@@ -4,6 +4,7 @@ import './database.js';
 
 import seasonRoute from './src/route/season.js';
 import userRoute from './src/route/user.js';
+import submissionRoute from './src/route/submission.js'
 
 
 
@@ -15,6 +16,7 @@ const port = 3000;
 
 app.use('/season', seasonRoute);
 app.use('/user', userRoute);
+app.use('/submission', submissionRoute);
 
 
 app.get('/', (req, res) => {

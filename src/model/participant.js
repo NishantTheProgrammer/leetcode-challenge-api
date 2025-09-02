@@ -1,16 +1,14 @@
 import mongoose from "mongoose";
-import User from "./user.js";
-import Season from "./season.js";
 
 
 const ParticipantSchema = new mongoose.Schema({
     userId: { 
-        type: mongoose.ObjectId, 
-        ref: User
+        type: mongoose.Schema.Types.ObjectId, 
+        ref: "User"
     },
     seasonId: { 
-        type: mongoose.ObjectId, 
-        ref: Season
+        type: mongoose.Schema.Types.ObjectId, 
+        ref: "Season"
     },
 }, {
     timestamps: true

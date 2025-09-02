@@ -18,7 +18,9 @@ const SeasonSchema = new mongoose.Schema({
         type: Date,
         required: true
     },
-})
+}, {
+    timestamps: true
+});
 
 
 SeasonSchema.pre('save', validateDates);

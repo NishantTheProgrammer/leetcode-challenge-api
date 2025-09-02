@@ -2,7 +2,8 @@
 import express from 'express'
 import './database.js';
 
-import seasonRoute from './src/route/season.js'
+import seasonRoute from './src/route/season.js';
+import userRoute from './src/route/user.js';
 
 
 
@@ -13,6 +14,7 @@ app.use(express.json());
 const port = 3000;
 
 app.use('/season', seasonRoute);
+app.use('/user', userRoute);
 
 
 app.get('/', (req, res) => {

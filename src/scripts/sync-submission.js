@@ -3,114 +3,351 @@ import axios from 'axios';
 
 import '../../database.js';
 import Season from '../model/season.js';
+import Submission from '../model/submission.js';
+import Participant from '../model/participant.js';
+
+const LEETCODE_GRAPHQL_URL = 'https://leetcode.com/graphql';
+const SUBMISSIONS_LIMIT = 50;
+const REQUEST_TIMEOUT = 10000;
 
 const sync = async () => {
-    const now = new Date();
-    const seasonsData = await Season.aggregate([
-        {
-            $match: {
-                startDate: { $lte: now },
-                endDate: { $gte: now }
-            }
-        },
-        {
-            $lookup: {
-                from: 'participants',
-                localField: '_id',
-                foreignField: 'seasonId',
-                as: 'participants'
-            }
-        },
-        {
-            $unwind: {
-                path: "$participants",
-                preserveNullAndEmptyArrays: true
-            }
-        },
-        {
-            $lookup: {
-                from: 'users', // users collection
-                localField: 'participants.userId', 
-                foreignField: '_id',
-                as: 'participants.user'
-            }
-        },
-        {
-            $unwind: {
-                path: "$participants.user",
-                preserveNullAndEmptyArrays: true
-            }
-        },
-        {
-            $group: {
-                _id: "$_id",
-                startDate: { $first: "$startDate" },
-                endDate: { $first: "$endDate" },
-                name: { $first: "$name" }, // if you have season name or other fields
-                participants: { $push: "$participants" }
-            }
+    try {
+        console.log('🚀 Starting LeetCode submissions sync...');
+        
+        const activeSeasons = await getActiveSeasons();
+        
+        if (activeSeasons.length === 0) {
+            console.log('ℹ️  No active seasons found');
+            return;
         }
-    ]);
 
-    for (const seasonData of seasonsData) {
-        await processSesionData(seasonData);
+        console.log(`📊 Found ${activeSeasons.length} active season(s)`);
+        
+        for (const seasonData of activeSeasons) {
+            await processSeasonData(seasonData);
+        }
+        
+        console.log('✅ Sync completed successfully');
+    } catch (error) {
+        console.error('❌ Sync failed:', error.message);
+        throw error;
+    } finally {
+        await mongoose.connection.close();
     }
-
-    mongoose.connection.close();
 };
 
-const flat = data => {
-    return Object.entries(data).map(([key, value]) => value.flat().map(v => ({...v, username: key}))).flat();
-}
-
-const getDifficultyQuery = data => {
-    return `query getMultipleQuestionDetails { 
-${data.map(d => `${d.titleSlug.split('-').join('_')}: question(titleSlug: "${d.titleSlug}") { title difficulty }`).join('\n')}
+const getActiveSeasons = async () => {
+    const now = new Date();
+    
+    try {
+        const seasonsData = await Season.aggregate([
+            {
+                $match: {
+                    startDate: { $lte: now },
+                    endDate: { $gte: now }
+                }
+            },
+            {
+                $lookup: {
+                    from: 'participants',
+                    localField: '_id',
+                    foreignField: 'seasonId',
+                    as: 'participants'
+                }
+            },
+            {
+                $match: {
+                    'participants.0': { $exists: true }
+                }
+            },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'participants.userId',
+                    foreignField: '_id',
+                    as: 'participantUsers'
+                }
+            },
+            {
+                $addFields: {
+                    participants: {
+                        $map: {
+                            input: '$participants',
+                            as: 'participant',
+                            in: {
+                                $mergeObjects: [
+                                    '$$participant',
+                                    {
+                                        user: {
+                                            $arrayElemAt: [
+                                                {
+                                                    $filter: {
+                                                        input: '$participantUsers',
+                                                        cond: { $eq: ['$$this._id', '$$participant.userId'] }
+                                                    }
+                                                },
+                                                0
+                                            ]
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            },
+            {
+                $project: {
+                    participantUsers: 0
+                }
+            }
+        ]);
         
-    }`;
-}
+        return seasonsData;
+    } catch (error) {
+        console.error('Error fetching active seasons:', error.message);
+        throw new Error(`Failed to fetch active seasons: ${error.message}`);
+    }
+};
 
-const processSesionData = async (seasonData) => {
-    const { name, startDate, endDate, participants } = seasonData;
+const flattenSubmissionsData = (data) => {
+    return Object.entries(data)
+        .map(([username, submissions]) => 
+            submissions.map(submission => ({
+                ...submission,
+                username
+            }))
+        )
+        .flat();
+};
 
-    console.log(`Fetching data (${name}): ${startDate.toLocaleString().split(',')[0]} to ${endDate.toLocaleString().split(',')[0]}`);
-    console.log('participants', participants[0]);
-    let payload = {
-        "query": `
-            query getMultipleACSubmissions { 
-                ${
-                    participants.map(({ user }) => `
-                        ${user.username}: recentAcSubmissionList(username: "${user.username}", limit: 2) { 
-                            id
-                            title 
-                            titleSlug 
-                            timestamp 
-                            statusDisplay 
-                            lang 
-                        } 
-                    `).join('\n')
-                } 
-            }`
-    };
-    const {data} = await axios.post('https://leetcode.com/graphql', payload);
-    const flatData = flat(data.data);
-    const query = getDifficultyQuery(flatData);
-    console.log(query);
-    const {data: difficultyData} = await axios.post('https://leetcode.com/graphql', {
-        query
+const buildDifficultyQuery = (submissions) => {
+    const uniqueTitleSlugs = [...new Set(submissions.map(s => s.titleSlug))];
+    
+    const questionQueries = uniqueTitleSlugs.map((titleSlug, index) => {
+        const fieldName = `q${index}`;
+        return `${fieldName}: question(titleSlug: "${titleSlug}") { 
+            titleSlug
+            difficulty 
+        }`;
     });
 
-    flatData.forEach(f => {
-        f['difficulty'] = difficultyData.data[f.titleSlug.split('-').join('_')]?.difficulty
-    })
+    return `query getMultipleQuestionDetails { 
+        ${questionQueries.join('\n')}
+    }`;
+};
 
-    console.log(JSON.stringify(flatData, 3, 3));
-}
+const fetchSubmissionsFromLeetCode = async (participants) => {
+    const userQueries = participants
+        .filter(p => p.user?.username)
+        .map(({ user }) => `
+            ${user.username}: recentAcSubmissionList(username: "${user.username}", limit: ${SUBMISSIONS_LIMIT}) { 
+                id
+                title 
+                titleSlug 
+                timestamp 
+                statusDisplay 
+                lang 
+            }
+        `);
 
+    if (userQueries.length === 0) {
+        throw new Error('No valid participants with usernames found');
+    }
 
-console.log('loading data');
+    const payload = {
+        query: `query getMultipleACSubmissions { 
+            ${userQueries.join('\n')}
+        }`
+    };
+
+    try {
+        const response = await axios.post(LEETCODE_GRAPHQL_URL, payload, {
+            timeout: REQUEST_TIMEOUT,
+            headers: {
+                'Content-Type': 'application/json',
+                'User-Agent': 'LeetCode-Challenge-API/1.0'
+            }
+        });
+
+        if (response.data.errors) {
+            throw new Error(`LeetCode API errors: ${JSON.stringify(response.data.errors)}`);
+        }
+
+        return response.data;
+    } catch (error) {
+        if (error.response) {
+            throw new Error(`LeetCode API error (${error.response.status}): ${error.response.statusText}`);
+        }
+        throw new Error(`Network error: ${error.message}`);
+    }
+};
+
+const fetchDifficultyData = async (submissions) => {
+    if (submissions.length === 0) {
+        return { data: {}, titleSlugs: [] };
+    }
+
+    const uniqueTitleSlugs = [...new Set(submissions.map(s => s.titleSlug))];
+    const query = buildDifficultyQuery(submissions);
+    
+    try {
+        const response = await axios.post(LEETCODE_GRAPHQL_URL, { query });
+
+        if (response.data.errors) {
+            console.warn('⚠️  Some difficulty queries failed:', response.data.errors);
+        }
+
+        return { 
+            data: response.data.data || {}, 
+            titleSlugs: uniqueTitleSlugs 
+        };
+    } catch (error) {
+        console.warn('⚠️  Failed to fetch difficulty data:', error.message);
+        return { data: {}, titleSlugs: uniqueTitleSlugs };
+    }
+};
+
+const saveSubmissions = async (submissions, seasonData) => {
+    if (submissions.length === 0) {
+        return 0;
+    }
+
+    const participantMap = new Map();
+    seasonData.participants.forEach(p => {
+        if (p.user?.username) {
+            participantMap.set(p.user.username, p);
+        }
+    });
+
+    const existingSubmissions = await Submission.find({
+        seasonId: seasonData._id,
+        $or: submissions.map(s => ({
+            titleSlug: s.titleSlug,
+            submittedAt: new Date(parseInt(s.timestamp) * 1000)
+        }))
+    }).select('titleSlug submittedAt userId');
+
+    const existingSet = new Set(
+        existingSubmissions.map(s => 
+            `${s.titleSlug}-${s.submittedAt.getTime()}-${s.userId}`
+        )
+    );
+
+    const bulkOps = [];
+    const skippedSubmissions = [];
+
+    for (const submission of submissions) {
+        const participant = participantMap.get(submission.username);
+        
+        if (!participant) {
+            console.warn(`⚠️  Participant not found for username: ${submission.username}`);
+            continue;
+        }
+
+        const submittedAt = new Date(parseInt(submission.timestamp) * 1000);
+        const uniqueKey = `${submission.titleSlug}-${submittedAt.getTime()}-${participant.userId}`;
+
+        if (existingSet.has(uniqueKey)) {
+            skippedSubmissions.push(submission.username);
+            continue;
+        }
+
+        bulkOps.push({
+            insertOne: {
+                document: {
+                    userId: participant.userId,
+                    seasonId: seasonData._id,
+                    participantId: participant._id,
+                    title: submission.title,
+                    titleSlug: submission.titleSlug,
+                    submittedAt: submittedAt,
+                    language: submission.lang,
+                    difficulty: submission.difficulty
+                }
+            }
+        });
+    }
+
+    if (bulkOps.length === 0) {
+        console.log(`   ℹ️  All ${submissions.length} submissions already exist`);
+        return 0;
+    }
+
+    try {
+        const result = await Submission.bulkWrite(bulkOps, { ordered: false });
+        
+        if (skippedSubmissions.length > 0) {
+            console.log(`   ⏭️  Skipped ${skippedSubmissions.length} duplicate submissions`);
+        }
+        
+        return result.insertedCount;
+    } catch (error) {
+        console.error('❌ Bulk write failed:', error.message);
+        
+        if (error.writeErrors && error.writeErrors.length > 0) {
+            console.error(`   ${error.writeErrors.length} individual write errors occurred`);
+            return error.result?.insertedCount || 0;
+        }
+        
+        throw error;
+    }
+};
+
+const processSeasonData = async (seasonData) => {
+    const { name, startDate, endDate, participants } = seasonData;
+
+    try {
+        console.log(`\n📅 Processing season: ${name}`);
+        console.log(`   Period: ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}`);
+        console.log(`   Participants: ${participants.length}`);
+
+        if (participants.length === 0) {
+            console.log('   ⚠️  No participants found, skipping...');
+            return;
+        }
+
+        console.log('   📥 Fetching submissions from LeetCode...');
+        const submissionsResponse = await fetchSubmissionsFromLeetCode(participants);
+        
+        const flattenedSubmissions = flattenSubmissionsData(submissionsResponse.data);
+        
+        if (flattenedSubmissions.length === 0) {
+            console.log('   ℹ️  No submissions found');
+            return;
+        }
+
+        console.log(`   📊 Found ${flattenedSubmissions.length} submissions`);
+
+        console.log('   📥 Fetching difficulty data...');
+        const difficultyResponse = await fetchDifficultyData(flattenedSubmissions);
+
+        const difficultyMap = {};
+        Object.values(difficultyResponse.data).forEach(questionData => {
+            if (questionData && questionData.titleSlug) {
+                difficultyMap[questionData.titleSlug] = questionData.difficulty;
+            }
+        });
+
+        flattenedSubmissions.forEach(submission => {
+            submission.difficulty = difficultyMap[submission.titleSlug] || 'Unknown';
+        });
+
+        console.log('   💾 Saving submissions to database...');
+        const savedCount = await saveSubmissions(flattenedSubmissions, seasonData);
+        
+        console.log(`   ✅ Saved ${savedCount} new submissions`);
+        
+    } catch (error) {
+        console.error(`❌ Failed to process season ${name}:`, error.message);
+        throw error;
+    }
+};
+
+console.log('🔄 Starting LeetCode submissions synchronization...');
 try {
     await sync();
-} catch (e) {
-    console.log('Error: ', e);
+} catch (error) {
+    console.error('💥 Synchronization failed:', error.message);
+    process.exit(1);
 }

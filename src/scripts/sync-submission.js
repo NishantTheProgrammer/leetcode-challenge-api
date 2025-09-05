@@ -146,7 +146,7 @@ const fetchSubmissionsFromLeetCode = async (participants, maxDaysOld = MAX_DAYS_
     const cutoffTimestamp = Math.floor(cutoffDate.getTime() / 1000);
     
     console.log(`   📅 Filtering submissions newer than ${cutoffDate.toLocaleDateString()}`);
-    c
+    
     const userQueries = participants
         .filter(p => p.user?.username)
         .map(({ user }) => `

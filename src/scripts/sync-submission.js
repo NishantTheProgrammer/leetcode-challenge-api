@@ -59,6 +59,17 @@ const sync = async () => {
     mongoose.connection.close();
 };
 
+const flat = data => {
+    return Object.entries(data).map(([key, value]) => value.flat().map(v => ({...v, username: key}))).flat();
+}
+
+const getDifficultyQuery = data => {
+    return `query getMultipleQuestionDetails { 
+${data.map(d => `${d.titleSlug.split('-').join('_')}: question(titleSlug: "${d.titleSlug}") { title difficulty }`).join('\n')}
+        
+    }`;
+}
+
 const processSesionData = async (seasonData) => {
     const { name, startDate, endDate, participants } = seasonData;
 
@@ -67,7 +78,6 @@ const processSesionData = async (seasonData) => {
     let payload = {
         "query": `
             query getMultipleACSubmissions { 
-
                 ${
                     participants.map(({ user }) => `
                         ${user.username}: recentAcSubmissionList(username: "${user.username}", limit: 2) { 
@@ -83,7 +93,18 @@ const processSesionData = async (seasonData) => {
             }`
     };
     const {data} = await axios.post('https://leetcode.com/graphql', payload);
-    console.log(JSON.stringify(data, 3, 3));
+    const flatData = flat(data.data);
+    const query = getDifficultyQuery(flatData);
+    console.log(query);
+    const {data: difficultyData} = await axios.post('https://leetcode.com/graphql', {
+        query
+    });
+
+    flatData.forEach(f => {
+        f['difficulty'] = difficultyData.data[f.titleSlug.split('-').join('_')]?.difficulty
+    })
+
+    console.log(JSON.stringify(flatData, 3, 3));
 }
 
 

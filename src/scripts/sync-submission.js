@@ -7,8 +7,9 @@ import Submission from '../model/submission.js';
 import Participant from '../model/participant.js';
 
 const LEETCODE_GRAPHQL_URL = 'https://leetcode.com/graphql';
-const SUBMISSIONS_LIMIT = 50;
+const SUBMISSIONS_LIMIT = 200;
 const REQUEST_TIMEOUT = 10000;
+const MAX_DAYS_OLD = 10;
 
 const sync = async () => {
     try {
@@ -121,6 +122,7 @@ const flattenSubmissionsData = (data) => {
         .flat();
 };
 
+
 const buildDifficultyQuery = (submissions) => {
     const uniqueTitleSlugs = [...new Set(submissions.map(s => s.titleSlug))];
     
@@ -137,7 +139,14 @@ const buildDifficultyQuery = (submissions) => {
     }`;
 };
 
-const fetchSubmissionsFromLeetCode = async (participants) => {
+const fetchSubmissionsFromLeetCode = async (participants, maxDaysOld = MAX_DAYS_OLD) => {
+    // Calculate cutoff timestamp for filtering
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - maxDaysOld);
+    const cutoffTimestamp = Math.floor(cutoffDate.getTime() / 1000);
+    
+    console.log(`   📅 Filtering submissions newer than ${cutoffDate.toLocaleDateString()}`);
+    c
     const userQueries = participants
         .filter(p => p.user?.username)
         .map(({ user }) => `
@@ -174,7 +183,20 @@ const fetchSubmissionsFromLeetCode = async (participants) => {
             throw new Error(`LeetCode API errors: ${JSON.stringify(response.data.errors)}`);
         }
 
-        return response.data;
+        // Apply date filtering immediately after receiving data
+        const filteredData = {};
+        Object.entries(response.data.data).forEach(([username, submissions]) => {
+            if (submissions && Array.isArray(submissions)) {
+                filteredData[username] = submissions.filter(submission => {
+                    const submissionTimestamp = parseInt(submission.timestamp);
+                    return submissionTimestamp >= cutoffTimestamp;
+                });
+            } else {
+                filteredData[username] = submissions;
+            }
+        });
+
+        return { data: filteredData };
     } catch (error) {
         if (error.response) {
             throw new Error(`LeetCode API error (${error.response.status}): ${error.response.statusText}`);
@@ -308,19 +330,19 @@ const processSeasonData = async (seasonData) => {
         }
 
         console.log('   📥 Fetching submissions from LeetCode...');
-        const submissionsResponse = await fetchSubmissionsFromLeetCode(participants);
+        const submissionsResponse = await fetchSubmissionsFromLeetCode(participants, MAX_DAYS_OLD);
         
-        const flattenedSubmissions = flattenSubmissionsData(submissionsResponse.data);
+        const recentSubmissions = flattenSubmissionsData(submissionsResponse.data);
         
-        if (flattenedSubmissions.length === 0) {
-            console.log('   ℹ️  No submissions found');
+        if (recentSubmissions.length === 0) {
+            console.log(`   ℹ️  No submissions found within the last ${MAX_DAYS_OLD} days`);
             return;
         }
 
-        console.log(`   📊 Found ${flattenedSubmissions.length} submissions`);
+        console.log(`   📊 Found ${recentSubmissions.length} submissions within the last ${MAX_DAYS_OLD} days`);
 
         console.log('   📥 Fetching difficulty data...');
-        const difficultyResponse = await fetchDifficultyData(flattenedSubmissions);
+        const difficultyResponse = await fetchDifficultyData(recentSubmissions);
 
         const difficultyMap = {};
         Object.values(difficultyResponse.data).forEach(questionData => {
@@ -329,12 +351,12 @@ const processSeasonData = async (seasonData) => {
             }
         });
 
-        flattenedSubmissions.forEach(submission => {
+        recentSubmissions.forEach(submission => {
             submission.difficulty = difficultyMap[submission.titleSlug] || 'Unknown';
         });
 
         console.log('   💾 Saving submissions to database...');
-        const savedCount = await saveSubmissions(flattenedSubmissions, seasonData);
+        const savedCount = await saveSubmissions(recentSubmissions, seasonData);
         
         console.log(`   ✅ Saved ${savedCount} new submissions`);
         

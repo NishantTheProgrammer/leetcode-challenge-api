@@ -123,14 +123,17 @@ const flattenSubmissionsData = (data) => {
 };
 
 
-const buildDifficultyQuery = (submissions) => {
+const buildQuestionDetailsQuery = (submissions) => {
     const uniqueTitleSlugs = [...new Set(submissions.map(s => s.titleSlug))];
     
     const questionQueries = uniqueTitleSlugs.map((titleSlug, index) => {
         const fieldName = `q${index}`;
         return `${fieldName}: question(titleSlug: "${titleSlug}") { 
             titleSlug
-            difficulty 
+            difficulty
+            topicTags {
+                name
+            }
         }`;
     });
 
@@ -205,19 +208,19 @@ const fetchSubmissionsFromLeetCode = async (participants, maxDaysOld = MAX_DAYS_
     }
 };
 
-const fetchDifficultyData = async (submissions) => {
+const fetchQuestionDetails = async (submissions) => {
     if (submissions.length === 0) {
         return { data: {}, titleSlugs: [] };
     }
 
     const uniqueTitleSlugs = [...new Set(submissions.map(s => s.titleSlug))];
-    const query = buildDifficultyQuery(submissions);
+    const query = buildQuestionDetailsQuery(submissions);
     
     try {
         const response = await axios.post(LEETCODE_GRAPHQL_URL, { query });
 
         if (response.data.errors) {
-            console.warn('⚠️  Some difficulty queries failed:', response.data.errors);
+            console.warn('⚠️  Some question detail queries failed:', response.data.errors);
         }
 
         return { 
@@ -225,7 +228,7 @@ const fetchDifficultyData = async (submissions) => {
             titleSlugs: uniqueTitleSlugs 
         };
     } catch (error) {
-        console.warn('⚠️  Failed to fetch difficulty data:', error.message);
+        console.warn('⚠️  Failed to fetch question details:', error.message);
         return { data: {}, titleSlugs: uniqueTitleSlugs };
     }
 };
@@ -285,7 +288,8 @@ const saveSubmissions = async (submissions, seasonData) => {
                     titleSlug: submission.titleSlug,
                     submittedAt: submittedAt,
                     language: submission.lang,
-                    difficulty: submission.difficulty
+                    difficulty: submission.difficulty,
+                    topicTags: submission.topicTags || []
                 }
             }
         });
@@ -341,18 +345,23 @@ const processSeasonData = async (seasonData) => {
 
         console.log(`   📊 Found ${recentSubmissions.length} submissions within the last ${MAX_DAYS_OLD} days`);
 
-        console.log('   📥 Fetching difficulty data...');
-        const difficultyResponse = await fetchDifficultyData(recentSubmissions);
+        console.log('   📥 Fetching question details (difficulty & topic tags)...');
+        const questionDetailsResponse = await fetchQuestionDetails(recentSubmissions);
 
-        const difficultyMap = {};
-        Object.values(difficultyResponse.data).forEach(questionData => {
+        const questionDetailsMap = {};
+        Object.values(questionDetailsResponse.data).forEach(questionData => {
             if (questionData && questionData.titleSlug) {
-                difficultyMap[questionData.titleSlug] = questionData.difficulty;
+                questionDetailsMap[questionData.titleSlug] = {
+                    difficulty: questionData.difficulty,
+                    topicTags: questionData.topicTags ? questionData.topicTags.map(tag => tag.name) : []
+                };
             }
         });
 
         recentSubmissions.forEach(submission => {
-            submission.difficulty = difficultyMap[submission.titleSlug] || 'Unknown';
+            const details = questionDetailsMap[submission.titleSlug];
+            submission.difficulty = details?.difficulty || 'Unknown';
+            submission.topicTags = details?.topicTags || [];
         });
 
         console.log('   💾 Saving submissions to database...');

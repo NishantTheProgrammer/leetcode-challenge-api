@@ -37,6 +37,10 @@ const SubmissionSchema = new mongoose.Schema({
     },
     difficulty: {
         type: String
+    },
+    topicTags: {
+        type: [String],
+        default: []
     }
 }, {
     timestamps: true

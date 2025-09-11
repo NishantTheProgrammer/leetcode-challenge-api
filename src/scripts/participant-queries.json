@@ -1,0 +1,44 @@
+{
+  "season1": [
+    {
+      "userId": "68b6c5f0fc8f6f1cd04a1389",
+      "seasonId": "68b1975f29ff283da961b5dd"
+    },
+    {
+      "userId": "68b6c5f0fc8f6f1cd04a1391",
+      "seasonId": "68b1975f29ff283da961b5dd"
+    },
+    {
+      "userId": "68b6c5f0fc8f6f1cd04a1386",
+      "seasonId": "68b1975f29ff283da961b5dd"
+    }
+  ],
+  "season2": [
+    {
+      "userId": "68b6c5f0fc8f6f1cd04a1389",
+      "seasonId": "68b819cbcef8e7c4a8e7a9bc"
+    },
+    {
+      "userId": "68b6c5f0fc8f6f1cd04a1392",
+      "seasonId": "68b819cbcef8e7c4a8e7a9bc"
+    },
+    {
+      "userId": "68b6c5f0fc8f6f1cd04a1391",
+      "seasonId": "68b819cbcef8e7c4a8e7a9bc"
+    },
+    {
+      "userId": "68b6c5f0fc8f6f1cd04a1386",
+      "seasonId": "68b819cbcef8e7c4a8e7a9bc"
+    },
+    {
+      "userId": "68b6c5f0fc8f6f1cd04a1387",
+      "seasonId": "68b819cbcef8e7c4a8e7a9bc"
+    },
+    {
+      "userId": "68b6c5f0fc8f6f1cd04a1388",
+      "seasonId": "68b819cbcef8e7c4a8e7a9bc"
+    }
+  ],
+  "total": 9,
+  "generatedAt": "2025-09-11T07:27:55.614Z"
+}

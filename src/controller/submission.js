@@ -18,6 +18,18 @@ const getSubmissionList = async (req, res) => {
                 foreignField: '_id',
                 as: 'season'
             }
+        },
+        {
+            $addFields: {
+                userName: { $arrayElemAt: ['$user.name', 0] },
+                seasonName: { $arrayElemAt: ['$season.name', 0] }
+            }
+        },
+        {
+            $project: {
+                user: 0,
+                season: 0
+            }
         }
     ]);
 

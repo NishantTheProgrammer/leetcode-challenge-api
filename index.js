@@ -1,15 +1,23 @@
 
 import express from 'express'
+import cors from 'cors';
 import './database.js';
 
 import seasonRoute from './src/route/season.js';
 import userRoute from './src/route/user.js';
 import submissionRoute from './src/route/submission.js'
 
-
-
 const app = express();
 
+// CORS configuration
+const corsOptions = {
+  origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  credentials: true
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 const port = 3000;

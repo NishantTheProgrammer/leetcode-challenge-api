@@ -20,6 +20,10 @@ const SubmissionSchema = new mongoose.Schema({
         ref: "Participant",
         required: true
     },
+    leetcodeSubmissionId: {
+        type: String,
+        required: true
+    },
     title: {
         type: String,
         required: true
